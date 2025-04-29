@@ -8,6 +8,8 @@ from src.xml_modifiers import (
         apply_environment_promotion,
         ENV_CONFIG
         )
+from src.errors import ControlMXmlError
+
 # --- Fixtures ---
 
 @pytest.fixture
