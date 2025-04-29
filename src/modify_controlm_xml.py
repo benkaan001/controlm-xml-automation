@@ -3,7 +3,10 @@ import argparse
 import os
 import sys
 import copy
-import re
+from typing import Optional
+from errors import ControlMXmlError
+
+
 
 # Attempt to import modifier functions
 try:
@@ -18,21 +21,18 @@ except ImportError as e:
     def standardize_notifications(root, env): print("  [Placeholder] standardize_notifications")
 
 
-def parse_xml(xml_path: str):
+def parse_xml(xml_path: str) -> Optional[ET.ElementTree]:
     """Parses the input XML file."""
     if not os.path.exists(xml_path):
         print(f"Error: Input XML file not found at {xml_path}", file=sys.stderr)
         return None
     try:
         tree = ET.parse(xml_path)
-        # print(f"Successfully parsed XML file: {xml_path}")
         return tree
     except ET.ParseError as e:
-        print(f"Error: Failed to parse XML file {xml_path}. Details: {e}", file=sys.stderr)
-        return None
+        raise ControlMXmlError(f"Failed to parse XML file {xml_path}. Details: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred during XML parsing: {e}", file=sys.stderr)
-        return None
+        raise ControlMXmlError(f"Unexpected error during XML parsing: {e}")
 
 def write_xml(tree: ET.ElementTree, output_path: str) -> bool:
     """Writes the XML tree to the output file."""
@@ -46,13 +46,11 @@ def write_xml(tree: ET.ElementTree, output_path: str) -> bool:
         print(f"Successfully wrote modified XML to: {output_path}")
         return True
     except IOError as e:
-        print(f"Error: Could not write output file {output_path}. Details: {e}", file=sys.stderr)
-        return False
+        raise ControlMXmlError(f"Could not write output file {output_path}. Details: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred while writing {output_path}: {e}", file=sys.stderr)
-        return False
+        raise ControlMXmlError(f"Unexpected error occurred while writing {output_path}: {e}")
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Modify Control-M XML definitions for environment promotion and standardization.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -87,7 +85,11 @@ def main():
     print(f"Target Environment: {args.target_env}")
     print(f"Steps to apply: {', '.join(args.steps)}")
 
-    xml_tree_original = parse_xml(args.input)
+    try:
+        xml_tree_original = parse_xml(args.input)
+    except ControlMXmlError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     if xml_tree_original is None:
         sys.exit(1)
 
@@ -118,17 +120,20 @@ def main():
             # Pass target_env only to functions that need it
             if step in ['promote', 'resources', 'notifications']:
                  func(root_modified, args.target_env)
-            else: # Includes 'activate' and any future steps not needing env
+            else:
                  func(root_modified)
-
             steps_applied_successfully.append(step)
             print(f"Step [{step}] applied.")
-
+        except ControlMXmlError as e:
+            print(f"Custom error during [{step}] step: {e}", file=sys.stderr)
+            steps_failed.append(step)
+            print("Exiting due to error in modification step.")
+            sys.exit(1)
         except Exception as e:
             print(f"Error during [{step}] step: {e}", file=sys.stderr)
             steps_failed.append(step)
             print("Exiting due to error in modification step.")
-            sys.exit(1) # Stop on first error
+            sys.exit(1)
 
     # Write the final result
     if not steps_applied_successfully:
@@ -137,7 +142,11 @@ def main():
          print(f"\nWarning: Some steps failed ({', '.join(steps_failed)}). Output file may be incomplete.")
     else:
         print(f"\nWriting final modified XML after steps: {', '.join(steps_applied_successfully)}")
-        if not write_xml(xml_tree_modified, args.output):
+        try:
+            if not write_xml(xml_tree_modified, args.output):
+                sys.exit(1)
+        except ControlMXmlError as e:
+            print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
     print(f"--- XML Modification Process Finished ---")

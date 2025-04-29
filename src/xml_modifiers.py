@@ -2,6 +2,8 @@ import xml.etree.ElementTree as ET
 import re
 import copy
 import sys
+from typing import Optional
+from errors import ControlMXmlError
 
 # --- Constants ---
 
@@ -88,7 +90,7 @@ def activate_folders(root: ET.Element) -> int:
     print("  Ensuring all folders are active (FOLDER_ORDER_METHOD='SYSTEM')...")
     activated_count = 0
     try:
-        for folder in root.findall('FOLDER'): # Iterate through direct children only
+        for folder in root.findall('FOLDER'):
             current_method = folder.get('FOLDER_ORDER_METHOD')
             if current_method != 'SYSTEM':
                 folder_name = folder.get('FOLDER_NAME', 'UNKNOWN_FOLDER')
@@ -96,12 +98,11 @@ def activate_folders(root: ET.Element) -> int:
                 folder.set('FOLDER_ORDER_METHOD', 'SYSTEM')
                 activated_count += 1
     except Exception as e:
-        print(f"  Error during folder activation: {e}", file=sys.stderr)
-        return -1 
+        raise ControlMXmlError(f"Error during folder activation: {e}", step="activate_folders")
     # print(f"  Activation check complete. Folders set to SYSTEM: {activated_count}.")
     return activated_count
 
-def standardize_notifications(root: ET.Element, target_env: str):
+def standardize_notifications(root: ET.Element, target_env: str) -> None:
     """
     Replaces existing ON blocks within each JOB with standardized templates
     for the target environment ('preprod' or 'prod'). Skips if target_env is 'dev'.
@@ -112,8 +113,7 @@ def standardize_notifications(root: ET.Element, target_env: str):
         print(f"  Skipping notification standardization for 'dev' environment.")
         return
     if target_env not in PARSED_NOTIFICATIONS:
-        print(f"  Error: Notification templates not available or invalid for target env '{target_env}'. Skipping step.", file=sys.stderr)
-        return # Skip if templates failed to parse
+        raise ControlMXmlError(f"Notification templates not available or invalid for target env '{target_env}'.", step="standardize_notifications")
 
     notification_elements_template = PARSED_NOTIFICATIONS[target_env]
     jobs_processed = 0
@@ -129,12 +129,11 @@ def standardize_notifications(root: ET.Element, target_env: str):
                 job.append(copy.deepcopy(on_template))
             jobs_processed += 1
     except Exception as e:
-        print(f"  Error during notification standardization: {e}", file=sys.stderr)
-        raise # Re-raise error to stop processing
+        raise ControlMXmlError(f"Error during notification standardization: {e}", step="standardize_notifications")
     # print(f"  Notification standardization complete. Processed {jobs_processed} jobs for {target_env}.")
 
 
-def standardize_resources(root: ET.Element, target_env: str):
+def standardize_resources(root: ET.Element, target_env: str) -> None:
     """
     Adds/Modifies QUANTITATIVE resources based on job name patterns
     (-ADB-, -ADF-, -DW-) and target environment. Modifies tree in place.
@@ -145,8 +144,7 @@ def standardize_resources(root: ET.Element, target_env: str):
         print(f"  Skipping resource standardization for 'dev' environment.")
         return
     if target_env not in ENV_CONFIG:
-        print(f"  Error: Environment config not found for '{target_env}'. Skipping step.", file=sys.stderr)
-        return
+        raise ControlMXmlError(f"Environment config not found for '{target_env}'.", step="standardize_resources")
 
     target_cfg = ENV_CONFIG[target_env]
     res_controlm = "CONTROLM-RESOURCE"
@@ -235,14 +233,13 @@ def standardize_resources(root: ET.Element, target_env: str):
 
 
     except Exception as e:
-        print(f"  Error during resource standardization: {e}", file=sys.stderr)
-        raise
+        raise ControlMXmlError(f"Error during resource standardization: {e}", step="standardize_resources")
 
     # print(f"  Resource standardization complete. Processed {jobs_processed} jobs for {target_env}.")
     # print(f"    Resources Added: {resources_added}, Resources Updated: {resources_updated}")
 
 # --- Environment Promotion Function ---
-def apply_environment_promotion(root: ET.Element, target_env: str):
+def apply_environment_promotion(root: ET.Element, target_env: str) -> None:
     """
     Modifies XML attributes, names, and variables for environment promotion.
     Assumes promotion path is dev -> preprod -> prod. Modifies the tree in place.
@@ -250,15 +247,13 @@ def apply_environment_promotion(root: ET.Element, target_env: str):
     """
     print(f"  Applying environment promotion modifications for target: {target_env}")
     if target_env not in ['preprod', 'prod']:
-        print(f"  Error: Invalid target env '{target_env}' for promotion.", file=sys.stderr)
-        return
+        raise ControlMXmlError(f"Invalid target env '{target_env}' for promotion.", step="apply_environment_promotion")
 
     source_env_type = 'dev' if target_env == 'preprod' else 'preprod'
     source_cfg = ENV_CONFIG.get(source_env_type, {})
     target_cfg = ENV_CONFIG.get(target_env, {})
     if not source_cfg or not target_cfg:
-        print(f"  Error: Missing config for '{source_env_type}' or '{target_env}'.", file=sys.stderr)
-        return
+        raise ControlMXmlError(f"Missing config for '{source_env_type}' or '{target_env}'.", step="apply_environment_promotion")
 
     # --- Source Patterns ---
     source_tag_pattern = source_cfg.get('env_tag_pattern')
