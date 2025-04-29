@@ -1,5 +1,7 @@
 # Control-M XML Automation
 
+[![CI Pipeline](https://github.com/benkaan001/controlm-xml-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/benkaan001/controlm-xml-automation/actions/workflows/ci.yml)
+
 ## Overview
 
 This Python-based command-line tool automates the complex and often error-prone process of modifying BMC Control-M job definition XML files for environment promotion (e.g., Dev -> PreProd -> Prod) and standardization. By parsing Control-M XML exports, applying targeted modifications based on environment-specific rules, and generating updated XML files, this tool significantly reduces manual effort, ensures consistency, and minimizes deployment risks associated with manual XML editing.
