@@ -93,6 +93,10 @@ def test_activate_folders_activates_manual(sample_xml_root_for_activation):
      activate_folders(root)
      assert folder_b.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
 
+def test_activate_folders_handles_no_folders():
+    root = ET.fromstring("<DEFTABLE></DEFTABLE>")
+    assert activate_folders(root) == 0
+
 # --- Test Functions for standardize_notifications ---
 @pytest.mark.parametrize("target_env", ['preprod', 'prod'])
 def test_notifications_applies_correct_template(sample_xml_root_for_notifications, target_env):
@@ -112,6 +116,12 @@ def test_notifications_skips_for_dev_env(sample_xml_root_for_notifications):
     standardize_notifications(root, 'dev')
     modified_xml_string = ET.tostring(root, encoding='unicode')
     assert modified_xml_string == original_xml_string
+
+def test_standardize_notifications_invalid_env(sample_xml_root_for_notifications):
+    root = copy.deepcopy(sample_xml_root_for_notifications)
+    standardize_notifications(root, 'nonexistent')
+    job = root.find(".//JOB[@JOBNAME='JOB_X1_NO_ON']")
+    assert len(job.findall('ON')) == 0
 
 # --- Test Functions for standardize_resources ---
 def get_resource_names(job_element: ET.Element) -> set:
@@ -178,6 +188,12 @@ def test_resources_skips_for_dev_env(sample_xml_root_for_resources):
     standardize_resources(root, 'dev')
     modified_xml_string = ET.tostring(root, encoding='unicode')
     assert modified_xml_string == original_xml_string
+
+def test_standardize_resources_invalid_env(sample_xml_root_for_resources):
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    standardize_resources(root, 'nonexistent')
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-ADB-MISSING']")
+    assert get_resource_names(job) == {"CONTROLM-RESOURCE"}
 
 
 # --- Test Functions for apply_environment_promotion ---
@@ -268,4 +284,44 @@ def test_promotion_preprod_to_prod_user_variable(dev_xml_root_for_promotion):
     updated_var = updated_job.find("./VARIABLE[@NAME='%%user']")
     expected_user_val = 'svc_acct_fin' # Prod has no suffix in example config
     assert updated_var.get('VALUE') == expected_user_val
+
+def test_apply_environment_promotion_invalid_env(dev_xml_root_for_promotion):
+    root = copy.deepcopy(dev_xml_root_for_promotion)
+    apply_environment_promotion(root, 'dev')
+    assert root.find("./FOLDER[@FOLDER_NAME='FIN-DEV-GL-ETL-PROJCODE-001']") is not None
+
+def test_apply_environment_promotion_missing_config(monkeypatch, dev_xml_root_for_promotion):
+    import src.xml_modifiers as xml_modifiers
+    orig_env_config = xml_modifiers.ENV_CONFIG.copy()
+    xml_modifiers.ENV_CONFIG.pop('preprod', None)
+    root = copy.deepcopy(dev_xml_root_for_promotion)
+    with pytest.raises(Exception):
+        apply_environment_promotion(root, 'preprod')
+    xml_modifiers.ENV_CONFIG = orig_env_config
+
+def test_standardize_resources_handles_job_with_no_quants():
+    xml = """
+<DEFTABLE>
+    <FOLDER>
+        <JOB JOBNAME="JOB-NO-QUANTS"></JOB>
+    </FOLDER>
+</DEFTABLE>
+"""
+    root = ET.fromstring(xml)
+    job = root.find(".//JOB")
+    standardize_resources(root, 'preprod')
+    assert any(q.get('NAME') == "CONTROLM-RESOURCE" for q in job.findall('QUANTITATIVE'))
+
+def test_standardize_notifications_handles_job_with_no_on_blocks():
+    xml = """
+<DEFTABLE>
+    <FOLDER>
+        <JOB JOBNAME="JOB-NO-ON"></JOB>
+    </FOLDER>
+</DEFTABLE>
+"""
+    root = ET.fromstring(xml)
+    job = root.find(".//JOB")
+    standardize_notifications(root, 'preprod')
+    assert any(on.tag == "ON" for on in job)
 
