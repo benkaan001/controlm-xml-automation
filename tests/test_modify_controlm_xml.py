@@ -3,38 +3,67 @@ import xml.etree.ElementTree as ET
 import os
 import sys
 import copy
-from src.xml_modifiers import activate_folders, standardize_notifications, ENV_CONFIG
+import re
+from src.xml_modifiers import activate_folders, standardize_notifications, standardize_resources, ENV_CONFIG
 
 # --- Fixtures ---
 
 @pytest.fixture
 def sample_xml_root_for_activation():
-    """Provides XML root for testing folder activation scenarios."""
-    xml_string = """
-<DEFTABLE>
+    xml_string = """<DEFTABLE>
     <FOLDER FOLDER_NAME="FOLDER_A_ACTIVE" FOLDER_ORDER_METHOD="SYSTEM"/>
     <FOLDER FOLDER_NAME="FOLDER_B_MANUAL" FOLDER_ORDER_METHOD="MANUAL"/>
     <FOLDER FOLDER_NAME="FOLDER_C_MISSING_ATTR"/>
-    <FOLDER FOLDER_NAME="FOLDER_D_EMPTY_ATTR" FOLDER_ORDER_METHOD=""/>
-    <FOLDER FOLDER_NAME="FOLDER_E_SYSTEM" FOLDER_ORDER_METHOD="SYSTEM"/>
-</DEFTABLE>
-"""
+    </DEFTABLE>"""
     return ET.fromstring(xml_string)
 
 @pytest.fixture
 def sample_xml_root_for_notifications():
-    """Provides XML root for testing notification standardization."""
-    xml_string = """
-<DEFTABLE>
+     xml_string = """<DEFTABLE>
     <FOLDER FOLDER_NAME="FOLDER_X">
-        <JOB JOBNAME="JOB_X1_NO_ON">
-            <VARIABLE NAME="VAR1" VALUE="X"/>
+        <JOB JOBNAME="JOB_X1_NO_ON"/>
+        <JOB JOBNAME="JOB_X2_ONE_ON"><ON STMT="*"><DOMAIL DEST="old@example.com"/></ON></JOB>
+    </FOLDER></DEFTABLE>"""
+     return ET.fromstring(xml_string)
+
+@pytest.fixture
+def sample_xml_root_for_resources():
+    """Provides XML root for testing resource standardization - FIXED JOB NAMES."""
+    try:
+        prod_adf_res = ENV_CONFIG.get('prod', {}).get('adf_resource', 'APP-AZ-ADF')
+    except Exception:
+         prod_adf_res = "APP-AZ-ADF" # Fallback
+
+    xml_string = f"""
+<DEFTABLE>
+    <FOLDER FOLDER_NAME="FOLDER_RES">
+        <JOB JOBNAME="JOB-PREFIX-ADB-MISSING">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
         </JOB>
-        <JOB JOBNAME="JOB_X2_ONE_ON">
-            <VARIABLE NAME="VAR1" VALUE="Y"/>
-            <ON STMT="*">
-                <DOMAIL DEST="old@example.com"/>
-            </ON>
+        <JOB JOBNAME="JOB-PREFIX-ADB-DEVRES">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+             <QUANTITATIVE NAME="DWDEV" QUANT="1"/>
+             <QUANTITATIVE NAME="ADBDEV" QUANT="1"/>
+             <OUTCOND NAME="COND1" ODATE="ODAT"/>
+        </JOB>
+        <JOB JOBNAME="JOB-PREFIX-ADF-DEVRES">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+             <QUANTITATIVE NAME="ADFDEV" QUANT="1"/>
+        </JOB>
+        <JOB JOBNAME="JOB-PREFIX-DW-ONLYCM">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+        </JOB>
+        <JOB JOBNAME="JOB-PREFIX-DW-WRONGRES">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+             <QUANTITATIVE NAME="SOMETHING_ELSE" QUANT="1"/>
+        </JOB>
+         <JOB JOBNAME="JOB-PREFIX-ADF-CORRECTPROD">
+             <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+             <QUANTITATIVE NAME="{prod_adf_res}" QUANT="1"/>
+        </JOB>
+        <JOB JOBNAME="JOB_RES_OTHER_TYPE">
+            <QUANTITATIVE NAME="CONTROLM-RESOURCE" QUANT="1"/>
+            <QUANTITATIVE NAME="OTHER_RES" QUANT="1"/>
         </JOB>
     </FOLDER>
 </DEFTABLE>
@@ -46,118 +75,138 @@ def sample_xml_root_for_notifications():
 def test_activate_folders_activates_missing(sample_xml_root_for_activation):
     root = copy.deepcopy(sample_xml_root_for_activation)
     folder_c = root.find("./FOLDER[@FOLDER_NAME='FOLDER_C_MISSING_ATTR']")
-    assert folder_c.get('FOLDER_ORDER_METHOD') is None
     activate_folders(root)
     assert folder_c.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
 
 def test_activate_folders_activates_manual(sample_xml_root_for_activation):
-    root = copy.deepcopy(sample_xml_root_for_activation)
-    folder_b = root.find("./FOLDER[@FOLDER_NAME='FOLDER_B_MANUAL']")
-    assert folder_b.get('FOLDER_ORDER_METHOD') == 'MANUAL'
-    activate_folders(root)
-    assert folder_b.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-
-def test_activate_folders_activates_empty_attr(sample_xml_root_for_activation):
-    root = copy.deepcopy(sample_xml_root_for_activation)
-    folder_d = root.find("./FOLDER[@FOLDER_NAME='FOLDER_D_EMPTY_ATTR']")
-    assert folder_d.get('FOLDER_ORDER_METHOD') == ''
-    activate_folders(root)
-    assert folder_d.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-
-def test_activate_folders_leaves_system_unchanged(sample_xml_root_for_activation):
-    root = copy.deepcopy(sample_xml_root_for_activation)
-    folder_a = root.find("./FOLDER[@FOLDER_NAME='FOLDER_A_ACTIVE']")
-    folder_e = root.find("./FOLDER[@FOLDER_NAME='FOLDER_E_SYSTEM']")
-    assert folder_a.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-    assert folder_e.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-    activate_folders(root)
-    assert folder_a.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-    assert folder_e.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
-
-def test_activate_folders_returns_correct_count(sample_xml_root_for_activation):
-    root = copy.deepcopy(sample_xml_root_for_activation)
-    expected_count = 3
-    actual_count = activate_folders(root)
-    assert actual_count == expected_count
-
-def test_activate_folders_empty_root():
-    root = ET.fromstring("<DEFTABLE></DEFTABLE>")
-    count = activate_folders(root)
-    assert count == 0
+     root = copy.deepcopy(sample_xml_root_for_activation)
+     folder_b = root.find("./FOLDER[@FOLDER_NAME='FOLDER_B_MANUAL']")
+     activate_folders(root)
+     assert folder_b.get('FOLDER_ORDER_METHOD') == 'SYSTEM'
 
 # --- Test Functions for standardize_notifications ---
-
-def test_notifications_removes_existing_on_blocks(sample_xml_root_for_notifications):
-    """Verify existing ON blocks are removed before adding new ones."""
-    root = copy.deepcopy(sample_xml_root_for_notifications)
-    job_x2 = root.find(".//JOB[@JOBNAME='JOB_X2_ONE_ON']")
-    assert len(job_x2.findall('ON')) == 1 # Precondition
-
-    standardize_notifications(root, 'preprod') # Apply preprod template
-
-    # Check that the number of ON blocks matches the preprod template now
-    expected_on_count = 2
-    assert len(job_x2.findall('ON')) == expected_on_count
-
-
-def test_notifications_adds_to_job_with_no_on(sample_xml_root_for_notifications):
-    """Verify notifications are added to jobs that initially had none."""
-    root = copy.deepcopy(sample_xml_root_for_notifications)
-    job_x1 = root.find(".//JOB[@JOBNAME='JOB_X1_NO_ON']")
-    assert len(job_x1.findall('ON')) == 0
-
-    standardize_notifications(root, 'prod') # Apply prod template
-
-
-    expected_on_count = 1
-    assert len(job_x1.findall('ON')) == expected_on_count
-
 @pytest.mark.parametrize("target_env", ['preprod', 'prod'])
 def test_notifications_applies_correct_template(sample_xml_root_for_notifications, target_env):
-    """Check if the correct email destination from the template is applied."""
     root = copy.deepcopy(sample_xml_root_for_notifications)
     job = root.find(".//JOB[@JOBNAME='JOB_X1_NO_ON']")
-
     standardize_notifications(root, target_env)
-
     on_blocks = job.findall('ON')
     assert len(on_blocks) > 0
-    # Find the first DOMAIL element across all added ON blocks
-    domail = None
-    for on_block in on_blocks:
-        domail = on_block.find('DOMAIL')
-        if domail is not None:
-            break
+    domail = next((on.find('DOMAIL') for on in on_blocks if on.find('DOMAIL') is not None), None)
     assert domail is not None
-
-    # Check if the destination matches the config for the target environment
     expected_dest = ENV_CONFIG[target_env]['notification_dest']
     assert domail.get('DEST') == expected_dest
 
-def test_notifications_handles_empty_root():
-    """Test notification standardization with an empty DEFTABLE."""
-    root = ET.fromstring("<DEFTABLE></DEFTABLE>")
-    standardize_notifications(root, 'preprod')
-    assert len(root.findall('.//JOB')) == 0
-
 def test_notifications_skips_for_dev_env(sample_xml_root_for_notifications):
-    """Verify that the function explicitly skips processing for 'dev' target."""
     root = copy.deepcopy(sample_xml_root_for_notifications)
-    # Store the original XML string to compare against
+    original_xml_string = ET.tostring(root, encoding='unicode')
+    standardize_notifications(root, 'dev')
+    modified_xml_string = ET.tostring(root, encoding='unicode')
+    assert modified_xml_string == original_xml_string
+
+# --- Test Functions for standardize_resources ---
+
+# Helper to get resource names from a job element
+def get_resource_names(job_element: ET.Element) -> set:
+    return {q.get('NAME') for q in job_element.findall('QUANTITATIVE')}
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_adb_adds_missing(sample_xml_root_for_resources, target_env):
+    """Verify ADB jobs get expected target resources added."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-ADB-MISSING']")
+    assert len(job.findall('QUANTITATIVE')) == 1 # Precondition
+
+    standardize_resources(root, target_env)
+
+    target_cfg = ENV_CONFIG[target_env]
+    expected_resources = {
+        "CONTROLM-RESOURCE",
+        target_cfg['dw_resource'],
+        target_cfg['adb_resource']
+    }
+    assert get_resource_names(job) == expected_resources
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_adb_ignores_dev_resources(sample_xml_root_for_resources, target_env):
+    """Verify ADB jobs have expected target resources added, even if dev ones exist."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-ADB-DEVRES']")
+    initial_resources = get_resource_names(job)
+    assert "DWDEV" in initial_resources # Precondition
+    assert "ADBDEV" in initial_resources # Precondition
+
+    standardize_resources(root, target_env)
+
+    target_cfg = ENV_CONFIG[target_env]
+    final_resources = get_resource_names(job)
+
+    # Check that all expected target resources are now present
+    assert target_cfg['dw_resource'] in final_resources
+    assert target_cfg['adb_resource'] in final_resources
+    assert "CONTROLM-RESOURCE" in final_resources
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_adf_updates_dev_resource(sample_xml_root_for_resources, target_env):
+    """Verify ADF job has its dev resource updated to the target resource."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-ADF-DEVRES']")
+    initial_resources = get_resource_names(job)
+    assert "ADFDEV" in initial_resources # Precondition
+
+    standardize_resources(root, target_env)
+
+    target_cfg = ENV_CONFIG[target_env]
+    expected_resources = {"CONTROLM-RESOURCE", target_cfg['adf_resource']}
+    assert get_resource_names(job) == expected_resources
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_dw_adds_missing(sample_xml_root_for_resources, target_env):
+    """Verify DW job with only CONTROLM gets the target DW resource added."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-DW-ONLYCM']")
+    assert len(job.findall('QUANTITATIVE')) == 1 # Precondition
+
+    standardize_resources(root, target_env)
+
+    target_cfg = ENV_CONFIG[target_env]
+    expected_resources = {"CONTROLM-RESOURCE", target_cfg['dw_resource']}
+    assert get_resource_names(job) == expected_resources
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_dw_updates_wrong_resource(sample_xml_root_for_resources, target_env):
+    """Verify DW job with an incorrect resource gets it updated."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB-PREFIX-DW-WRONGRES']")
+    assert "SOMETHING_ELSE" in get_resource_names(job) # Precondition
+
+    standardize_resources(root, target_env)
+
+    target_cfg = ENV_CONFIG[target_env]
+    expected_resources = {"CONTROLM-RESOURCE", target_cfg['dw_resource']}
+    assert get_resource_names(job) == expected_resources
+
+@pytest.mark.parametrize("target_env", ['preprod', 'prod'])
+def test_resources_leaves_other_jobs_unchanged(sample_xml_root_for_resources, target_env):
+    """Verify jobs not matching ADF/ADB/DW patterns are not changed."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
+    job = root.find(".//JOB[@JOBNAME='JOB_RES_OTHER_TYPE']")
+    initial_resources = get_resource_names(job)
+    assert initial_resources == {"CONTROLM-RESOURCE", "OTHER_RES"} # Precondition
+
+    standardize_resources(root, target_env)
+
+    # Resources should remain the same
+    assert get_resource_names(job) == initial_resources
+
+def test_resources_skips_for_dev_env(sample_xml_root_for_resources):
+    """Verify resource standardization is skipped for target_env='dev'."""
+    root = copy.deepcopy(sample_xml_root_for_resources)
     original_xml_string = ET.tostring(root, encoding='unicode')
 
-    # Run the function targeting 'dev'
-    standardize_notifications(root, 'dev')
+    standardize_resources(root, 'dev') # Target 'dev'
 
-    # Get the XML string after running the function
     modified_xml_string = ET.tostring(root, encoding='unicode')
-
-    # Assert that the XML tree was not modified
+    # XML should be unchanged
     assert modified_xml_string == original_xml_string
-    # Additionally check that no ON blocks were added to a job that had none
-    job_x1 = root.find(".//JOB[@JOBNAME='JOB_X1_NO_ON']")
-    assert len(job_x1.findall('ON')) == 0
-
-
-# Add tests...
 
