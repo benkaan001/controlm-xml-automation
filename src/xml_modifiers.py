@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 import re
 import copy
 import sys
-from typing import Optional
+import logging
 from errors import ControlMXmlError
 
 # --- Constants ---
@@ -87,19 +87,18 @@ def activate_folders(root: ET.Element) -> int:
     Sets FOLDER_ORDER_METHOD to 'SYSTEM' for all FOLDER elements
     that don't already have it set to 'SYSTEM'. Modifies the tree in place.
     """
-    print("  Ensuring all folders are active (FOLDER_ORDER_METHOD='SYSTEM')...")
+    logging.info("Ensuring all folders are active (FOLDER_ORDER_METHOD='SYSTEM')...")
     activated_count = 0
     try:
         for folder in root.findall('FOLDER'):
             current_method = folder.get('FOLDER_ORDER_METHOD')
             if current_method != 'SYSTEM':
                 folder_name = folder.get('FOLDER_NAME', 'UNKNOWN_FOLDER')
-                # print(f"    Setting folder to SYSTEM: {folder_name} (was: {current_method})")
                 folder.set('FOLDER_ORDER_METHOD', 'SYSTEM')
                 activated_count += 1
     except Exception as e:
-        raise ControlMXmlError(f"Error during folder activation: {e}", step="activate_folders")
-    # print(f"  Activation check complete. Folders set to SYSTEM: {activated_count}.")
+        logging.error(f"Error during folder activation: {e}")
+        return -1
     return activated_count
 
 def standardize_notifications(root: ET.Element, target_env: str) -> None:
@@ -108,30 +107,27 @@ def standardize_notifications(root: ET.Element, target_env: str) -> None:
     for the target environment ('preprod' or 'prod'). Skips if target_env is 'dev'.
     Modifies the tree in place.
     """
-    print(f"  Standardizing notifications for target: {target_env}")
+    logging.info(f"Standardizing notifications for target: {target_env}")
     if target_env == 'dev':
-        print(f"  Skipping notification standardization for 'dev' environment.")
+        logging.info("Skipping notification standardization for 'dev' environment.")
         return
     if target_env not in PARSED_NOTIFICATIONS:
-        raise ControlMXmlError(f"Notification templates not available or invalid for target env '{target_env}'.", step="standardize_notifications")
+        logging.error(f"Notification templates not available or invalid for target env '{target_env}'. Skipping step.")
+        return
 
     notification_elements_template = PARSED_NOTIFICATIONS[target_env]
     jobs_processed = 0
     try:
         for job in root.findall('.//JOB'):
-            # Remove existing ON elements first
             existing_on_elements = job.findall('ON')
             for on_elem in existing_on_elements:
                 job.remove(on_elem)
-
-            # Append deep copies of the standard ON elements
             for on_template in notification_elements_template:
                 job.append(copy.deepcopy(on_template))
             jobs_processed += 1
     except Exception as e:
-        raise ControlMXmlError(f"Error during notification standardization: {e}", step="standardize_notifications")
-    # print(f"  Notification standardization complete. Processed {jobs_processed} jobs for {target_env}.")
-
+        logging.error(f"Error during notification standardization: {e}")
+        raise
 
 def standardize_resources(root: ET.Element, target_env: str) -> None:
     """
@@ -139,12 +135,13 @@ def standardize_resources(root: ET.Element, target_env: str) -> None:
     (-ADB-, -ADF-, -DW-) and target environment. Modifies tree in place.
     Also updates any existing ADF/DW/ADB resource names to match the target environment.
     """
-    print(f"  Standardizing QUANTITATIVE resources for target: {target_env}")
+    logging.info(f"Standardizing QUANTITATIVE resources for target: {target_env}")
     if target_env == 'dev':
-        print(f"  Skipping resource standardization for 'dev' environment.")
+        logging.info("Skipping resource standardization for 'dev' environment.")
         return
     if target_env not in ENV_CONFIG:
-        raise ControlMXmlError(f"Environment config not found for '{target_env}'.", step="standardize_resources")
+        logging.error(f"Environment config not found for '{target_env}'. Skipping step.")
+        return
 
     target_cfg = ENV_CONFIG[target_env]
     res_controlm = "CONTROLM-RESOURCE"
@@ -233,10 +230,8 @@ def standardize_resources(root: ET.Element, target_env: str) -> None:
 
 
     except Exception as e:
-        raise ControlMXmlError(f"Error during resource standardization: {e}", step="standardize_resources")
-
-    # print(f"  Resource standardization complete. Processed {jobs_processed} jobs for {target_env}.")
-    # print(f"    Resources Added: {resources_added}, Resources Updated: {resources_updated}")
+        logging.error(f"Error during resource standardization: {e}")
+        raise
 
 # --- Environment Promotion Function ---
 def apply_environment_promotion(root: ET.Element, target_env: str) -> None:
@@ -245,9 +240,10 @@ def apply_environment_promotion(root: ET.Element, target_env: str) -> None:
     Assumes promotion path is dev -> preprod -> prod. Modifies the tree in place.
     Also updates OUTCOND and INCOND NAME attributes to match promoted environment.
     """
-    print(f"  Applying environment promotion modifications for target: {target_env}")
+    logging.info(f"Applying environment promotion modifications for target: {target_env}")
     if target_env not in ['preprod', 'prod']:
-        raise ControlMXmlError(f"Invalid target env '{target_env}' for promotion.", step="apply_environment_promotion")
+        logging.error(f"Invalid target env '{target_env}' for promotion.")
+        return
 
     source_env_type = 'dev' if target_env == 'preprod' else 'preprod'
     source_cfg = ENV_CONFIG.get(source_env_type, {})
@@ -271,7 +267,7 @@ def apply_environment_promotion(root: ET.Element, target_env: str) -> None:
     job_suffix_remove = target_cfg.get('job_suffix_to_remove', '')
     job_suffix_add = target_cfg.get('job_suffix_to_add', '')
 
-    print(f"  Promoting FROM '{source_env_type}' TO '{target_env}' configuration.")
+    logging.info(f"Promoting FROM '{source_env_type}' TO '{target_env}' configuration.")
     modified_count = 0
     name_attributes = ['FOLDER_NAME', 'APPLICATION', 'SUB_APPLICATION', 'PARENT_FOLDER', 'JOBNAME']
 
