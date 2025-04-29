@@ -55,7 +55,93 @@ def write_xml(tree: ET.ElementTree, output_path: str) -> bool:
         logging.error(f"An unexpected error occurred while writing {output_path}: {e}")
         return False
 
-def main() -> None:
+def main(input_path, output_path, target_env, steps):
+    """
+    Main function to modify a Control-M XML file.
+
+    Args:
+        input_path (str): Path to the input XML file.
+        output_path (str): Path to the output XML file.
+        target_env (str): Target environment name.
+        steps (list): List of steps to apply in order.
+
+    The steps are applied in the order provided.
+    """
+    logging.info(f"--- Starting Control-M XML Modification ---")
+    logging.info(f"Input file: {input_path}")
+    logging.info(f"Output file: {output_path}")
+    logging.info(f"Target Environment: {target_env}")
+    logging.info(f"Steps to apply: {', '.join(steps)}")
+
+    xml_tree_original = parse_xml(input_path)
+    if xml_tree_original is None:
+        sys.exit(1)
+
+    # Work on a copy to allow sequential modifications safely
+    xml_tree_modified = copy.deepcopy(xml_tree_original)
+    root_modified = xml_tree_modified.getroot()
+
+    steps_applied_successfully = []
+    steps_failed = []
+
+    step_function_map = {
+        'promote': apply_environment_promotion,
+        'activate': activate_folders,
+        'resources': standardize_resources,
+        'notifications': standardize_notifications
+    }
+
+    # Apply steps in the user-specified order
+    for step in steps:
+        logging.info(f"Applying step: [{step}]...")
+        func = step_function_map.get(step)
+        if not func:
+            logging.error(f"Unknown step '{step}'")
+            steps_failed.append(step)
+            continue
+
+        try:
+            # Pass target_env only to functions that need it
+            if step in ['promote', 'resources', 'notifications']:
+                 func(root_modified, target_env)
+            else:
+                 func(root_modified)
+            steps_applied_successfully.append(step)
+            logging.info(f"Step [{step}] applied.")
+        except ControlMXmlError as e:
+            logging.error(f"Custom error during [{step}] step: {e}")
+            steps_failed.append(step)
+            logging.error("Exiting due to error in modification step.")
+            sys.exit(1)
+        except Exception as e:
+            logging.error(f"Error during [{step}] step: {e}")
+            steps_failed.append(step)
+            logging.error("Exiting due to error in modification step.")
+            sys.exit(1)
+
+    # Write the final result
+    if not steps_applied_successfully:
+        logging.warning("No modification steps were successfully applied. Output file not written.")
+    elif steps_failed:
+         logging.warning(f"Some steps failed ({', '.join(steps_failed)}). Output file may be incomplete.")
+    else:
+        logging.info(f"Writing final modified XML after steps: {', '.join(steps_applied_successfully)}")
+        if not write_xml(xml_tree_modified, output_path):
+            sys.exit(1)
+
+    logging.info("--- XML Modification Process Finished ---")
+    if steps_failed:
+        logging.warning(f"--- WARNING: Steps Failed: {', '.join(steps_failed)} ---")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
+
     parser = argparse.ArgumentParser(
         description="Modify Control-M XML definitions for environment promotion and standardization.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -84,79 +170,4 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    logging.info(f"--- Starting Control-M XML Modification ---")
-    logging.info(f"Input file: {args.input}")
-    logging.info(f"Output file: {args.output}")
-    logging.info(f"Target Environment: {args.target_env}")
-    logging.info(f"Steps to apply: {', '.join(args.steps)}")
-
-    xml_tree_original = parse_xml(args.input)
-    if xml_tree_original is None:
-        sys.exit(1)
-
-    # Work on a copy to allow sequential modifications safely
-    xml_tree_modified = copy.deepcopy(xml_tree_original)
-    root_modified = xml_tree_modified.getroot()
-
-    steps_applied_successfully = []
-    steps_failed = []
-
-    step_function_map = {
-        'promote': apply_environment_promotion,
-        'activate': activate_folders,
-        'resources': standardize_resources,
-        'notifications': standardize_notifications
-    }
-
-    # Apply steps in the user-specified order
-    for step in args.steps:
-        logging.info(f"Applying step: [{step}]...")
-        func = step_function_map.get(step)
-        if not func:
-            logging.error(f"Unknown step '{step}'")
-            steps_failed.append(step)
-            continue
-
-        try:
-            # Pass target_env only to functions that need it
-            if step in ['promote', 'resources', 'notifications']:
-                 func(root_modified, args.target_env)
-            else:
-                 func(root_modified)
-            steps_applied_successfully.append(step)
-            logging.info(f"Step [{step}] applied.")
-        except ControlMXmlError as e:
-            logging.error(f"Custom error during [{step}] step: {e}")
-            steps_failed.append(step)
-            logging.error("Exiting due to error in modification step.")
-            sys.exit(1)
-        except Exception as e:
-            logging.error(f"Error during [{step}] step: {e}")
-            steps_failed.append(step)
-            logging.error("Exiting due to error in modification step.")
-            sys.exit(1)
-
-    # Write the final result
-    if not steps_applied_successfully:
-        logging.warning("No modification steps were successfully applied. Output file not written.")
-    elif steps_failed:
-         logging.warning(f"Some steps failed ({', '.join(steps_failed)}). Output file may be incomplete.")
-    else:
-        logging.info(f"Writing final modified XML after steps: {', '.join(steps_applied_successfully)}")
-        if not write_xml(xml_tree_modified, args.output):
-            sys.exit(1)
-
-    logging.info("--- XML Modification Process Finished ---")
-    if steps_failed:
-        logging.warning(f"--- WARNING: Steps Failed: {', '.join(steps_failed)} ---")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)]
-    )
-
-    main()
+    main(args.input, args.output, args.target_env, args.steps)
