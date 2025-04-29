@@ -97,7 +97,7 @@ def activate_folders(root: ET.Element) -> int:
                 activated_count += 1
     except Exception as e:
         print(f"  Error during folder activation: {e}", file=sys.stderr)
-        return -1 # Indicate error
+        return -1 
     # print(f"  Activation check complete. Folders set to SYSTEM: {activated_count}.")
     return activated_count
 
@@ -232,7 +232,7 @@ def standardize_resources(root: ET.Element, target_env: str):
                         attribs = {'NAME': target_res, 'QUANT': '1', 'ONFAIL': 'R', 'ONOK': 'R'}
                         job.insert(insert_index, ET.Element('QUANTITATIVE', attribs))
                         resources_added += 1
-            # Else: Non-matching job type, do nothing specific
+
 
     except Exception as e:
         print(f"  Error during resource standardization: {e}", file=sys.stderr)
